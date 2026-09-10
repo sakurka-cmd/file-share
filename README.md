@@ -35,6 +35,21 @@ docker compose up -d --build
 | `HOST` | `0.0.0.0` | адрес прослушивания |
 | `PORT` | `8081` | порт |
 | `UPLOAD_DIR` | `/data` | каталог для файлов и `.meta.json` |
+| `AUTH_USER` | `admin` | логин для загрузки/списка/удаления |
+| `AUTH_PASSWORD` | _(пусто)_ | пароль; **пусто = авторизация выключена** |
+
+## Авторизация
+
+Если задан `AUTH_PASSWORD`, HTTP Basic-авторизация защищает загрузку, список и удаление
+(`/`, `/upload`, `/api/files`, `/api/delete/*`). Скачивание по ссылке `/d/<token>` остаётся
+**публичным**, чтобы получатель мог открыть ссылку без пароля.
+
+Проверка:
+
+```bash
+curl -i http://127.0.0.1:8081/            # 401
+curl -u admin:secret http://127.0.0.1:8081/   # 200
+```
 
 За обратным прокси `HOST` зависит от того, где стоит прокси:
 
@@ -60,6 +75,6 @@ docker compose up -d --build
 ```bash
 sudo mkdir -p /opt/file-share && sudo chown bvv:bvv /opt/file-share
 rsync -a --exclude .git --exclude data ./ bvv@192.168.0.217:/opt/file-share/
-# /opt/file-share/.env: HOST=0.0.0.0, PORT=8081, UPLOAD_DIR=/opt/file-share/data
+# /opt/file-share/.env: HOST=0.0.0.0, PORT=8081, UPLOAD_DIR=/opt/file-share/data, AUTH_USER=..., AUTH_PASSWORD=...
 ssh bvv@192.168.0.217 'sudo systemctl enable --now file-share'
 ```

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Minimal HTTPS file-sharing server: upload -> get download link, browse & delete files."""
 
-import os, secrets, time, pathlib, shutil
+import os, secrets, time, pathlib, shutil, base64, hmac
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs
 import json, mimetypes
@@ -9,6 +9,8 @@ import json, mimetypes
 UPLOAD_DIR = os.getenv("UPLOAD_DIR", "/data")
 HOST = os.getenv("HOST", "0.0.0.0")
 PORT = int(os.getenv("PORT", "8081"))
+AUTH_USER = os.getenv("AUTH_USER", "admin")
+AUTH_PASSWORD = os.getenv("AUTH_PASSWORD", "")
 
 HTML_UPLOAD = r"""<!DOCTYPE html>
 <html lang="ru">
@@ -221,8 +223,35 @@ def cleanup(meta):
 
 
 class Handler(BaseHTTPRequestHandler):
+    def _authorized(self):
+        if not AUTH_PASSWORD:
+            return True
+        header = self.headers.get("Authorization", "")
+        if not header.startswith("Basic "):
+            return False
+        try:
+            raw = base64.b64decode(header[6:]).decode("utf-8")
+        except Exception:
+            return False
+        user, _, password = raw.partition(":")
+        return hmac.compare_digest(user, AUTH_USER) and hmac.compare_digest(password, AUTH_PASSWORD)
+
+    def _require_auth(self):
+        if self._authorized():
+            return True
+        body = "Требуется авторизация".encode("utf-8")
+        self.send_response(401)
+        self.send_header("WWW-Authenticate", 'Basic realm="File Share", charset="UTF-8"')
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+        return False
+
     def do_GET(self):
         parsed = urlparse(self.path).path
+        if not parsed.startswith("/d/") and not self._require_auth():
+            return
         if parsed == "/" or parsed == "":
             self._send_html(HTML_UPLOAD)
         elif parsed == "/api/files":
@@ -258,6 +287,8 @@ class Handler(BaseHTTPRequestHandler):
             self._send_html(HTML_EXPIRED, 404)
 
     def do_POST(self):
+        if not self._require_auth():
+            return
         parsed = urlparse(self.path).path
         if parsed != "/upload":
             self._send_json({"error": "not found"}, 404)
@@ -302,6 +333,8 @@ class Handler(BaseHTTPRequestHandler):
         self._send_json({"url": url, "name": name, "size": len(data)})
 
     def do_DELETE(self):
+        if not self._require_auth():
+            return
         parsed = urlparse(self.path).path
         if parsed.startswith("/api/delete/"):
             token = parsed[len("/api/delete/"):]
