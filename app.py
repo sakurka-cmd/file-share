@@ -21,6 +21,14 @@ SESSIONS = {}
 
 PERMS = ("upload", "delete", "view_all", "view_own")
 
+INLINE_TYPES = {
+    "image/png", "image/jpeg", "image/gif", "image/webp", "image/bmp", "image/avif",
+    "application/pdf",
+    "text/plain", "text/csv",
+    "video/mp4", "video/webm", "video/ogg",
+    "audio/mpeg", "audio/ogg", "audio/wav", "audio/webm", "audio/mp4",
+}
+
 
 def esc(s):
     return html.escape(str(s))
@@ -150,10 +158,12 @@ h2{font-size:1.05rem;color:#94a3b8;margin:6px 0 12px}
 .file-item{display:flex;align-items:center;gap:10px;background:#1e293b;border-radius:10px;padding:12px 14px;margin-bottom:8px}
 .file-info{flex:1;min-width:0}
 .file-name{font-size:.9rem;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.file-name a{color:#e2e8f0;text-decoration:none}
+.file-name a:hover{color:#38bdf8;text-decoration:underline}
 .file-meta{font-size:.75rem;color:#64748b;margin-top:2px}
-.file-actions{display:flex;gap:6px;flex-shrink:0}
+.file-actions{display:flex;gap:6px;flex-shrink:0;flex-wrap:wrap;justify-content:flex-end}
 .act-btn{padding:5px 10px;font-size:.75rem;border:1px solid #334155;background:transparent;color:#e2e8f0;
-  border-radius:5px;cursor:pointer;white-space:nowrap}
+  border-radius:5px;cursor:pointer;white-space:nowrap;display:inline-block;text-decoration:none}
 .act-btn:hover{background:#334155}
 .act-btn.del:hover{border-color:#dc2626;color:#fca5a5}
 .act-btn.confirming{background:#7f1d1d;border-color:#dc2626;color:#fff}
@@ -239,11 +249,15 @@ async function load(){
   if(!files.length){list.innerHTML='<div class="empty-msg">Нет файлов</div>';return}
   list.innerHTML=files.map(f=>{
     const url=location.origin+'/d/'+f.token;
+    const open='/d/'+f.token, dl='/d/'+f.token+'?download=1';
     const owner=d.can.view_all?(' &middot; '+esc(f.owner||'-')):'';
     const del=f.can_delete?('<button class="act-btn del" data-token="'+esc(f.token)+'" onclick="askDel(this)">Удалить</button>'):'';
-    return '<div class="file-item"><div class="file-info"><div class="file-name" title="'+esc(f.name)+'">'+esc(f.name)+'</div>'
+    return '<div class="file-item"><div class="file-info"><div class="file-name" title="'+esc(f.name)+'">'
+      +'<a href="'+open+'" target="_blank" rel="noopener">'+esc(f.name)+'</a></div>'
       +'<div class="file-meta">'+human(f.size)+' &middot; '+date(f.ts)+owner+'</div></div>'
-      +'<div class="file-actions"><button class="act-btn copy" onclick="copyUrl(this,\\''+url+'\\')">Копировать</button>'+del+'</div></div>';
+      +'<div class="file-actions"><a class="act-btn" href="'+open+'" target="_blank" rel="noopener">Открыть</a>'
+      +'<a class="act-btn" href="'+dl+'">Скачать</a>'
+      +'<button class="act-btn copy" onclick="copyUrl(this,\\''+url+'\\')">Копировать</button>'+del+'</div></div>';
   }).join('');
 }
 function copyUrl(btn,url){navigator.clipboard.writeText(url);btn.textContent='Скопировано!';setTimeout(()=>{btn.textContent='Копировать'},1500)}
@@ -516,15 +530,28 @@ class Handler(BaseHTTPRequestHandler):
         if not info or not os.path.exists(info.get("path", "")):
             self._send_html(HTML_EXPIRED, 404)
             return
+        qs = parse_qs(urlparse(self.path).query)
+        force_dl = "download" in qs
+        name = info.get("name", "file")
+        mime = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        inline = (not force_dl) and (mime in INLINE_TYPES)
         self.send_response(200)
-        mime = mimetypes.guess_type(info["name"])[0] or "application/octet-stream"
         self.send_header("Content-Type", mime)
         self.send_header("Content-Length", str(os.path.getsize(info["path"])))
-        self.send_header("Content-Disposition", 'attachment; filename="%s"' % info["name"])
+        self.send_header("Content-Disposition", self._disposition("inline" if inline else "attachment", name))
         self.send_header("Cache-Control", "no-cache")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if inline:
+            self.send_header("Content-Security-Policy",
+                             "default-src 'none'; img-src 'self'; media-src 'self'; style-src 'unsafe-inline'")
         self.end_headers()
         with open(info["path"], "rb") as f:
             shutil.copyfileobj(f, self.wfile)
+
+    def _disposition(self, kind, name):
+        ascii_name = name.encode("ascii", "ignore").decode("ascii") or "file"
+        ascii_name = ascii_name.replace('"', "").replace("\\", "").replace("\r", "").replace("\n", "")
+        return '%s; filename="%s"; filename*=UTF-8\'\'%s' % (kind, ascii_name, quote(name))
 
     # ---------- POST ----------
     def do_POST(self):
