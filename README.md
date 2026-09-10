@@ -36,7 +36,11 @@ docker compose up -d --build
 | `PORT` | `8081` | порт |
 | `UPLOAD_DIR` | `/data` | каталог для файлов и `.meta.json` |
 
-За обратным прокси (Caddy/nginx) задавайте `HOST=127.0.0.1`, а публикацию и HTTPS поручайте прокси.
+За обратным прокси `HOST` зависит от того, где стоит прокси:
+
+- прокси на **том же** хосте — `HOST=127.0.0.1` (сервис не торчит в сеть);
+- прокси на **другом** хосте (как в проде: Caddy на CT 108, приложение на zoopark) —
+  `HOST=0.0.0.0` или LAN-IP хоста, иначе прокси получит `connection refused`.
 
 ## HTTP API
 
@@ -56,6 +60,6 @@ docker compose up -d --build
 ```bash
 sudo mkdir -p /opt/file-share && sudo chown bvv:bvv /opt/file-share
 rsync -a --exclude .git --exclude data ./ bvv@192.168.0.217:/opt/file-share/
-# /opt/file-share/.env: HOST=127.0.0.1, PORT=8081, UPLOAD_DIR=/opt/file-share/data
+# /opt/file-share/.env: HOST=0.0.0.0, PORT=8081, UPLOAD_DIR=/opt/file-share/data
 ssh bvv@192.168.0.217 'sudo systemctl enable --now file-share'
 ```
